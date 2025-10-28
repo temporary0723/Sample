@@ -1921,48 +1921,6 @@ function getMessageLabel(mesId) {
 // ⭐ 모바일 터치 이벤트 안정화를 위한 변수
 let touchSelectionTimer = null;
 let lastTouchEnd = 0;
-let selectionChangeTimer = null; // 모바일 selectionchange 디바운스용
-
-function isTouchDevice() {
-	try {
-		return ("ontouchstart" in window) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
-	} catch (e) {
-		return false;
-	}
-}
-
-function handleSelectionChange() {
-	// 하이라이트 모드가 아닐 때는 무시
-	if (!isHighlightMode) return;
-
-	// 디바운스: 빠른 selectionchange 스팸 방지
-	if (selectionChangeTimer) clearTimeout(selectionChangeTimer);
-	selectionChangeTimer = setTimeout(() => {
-		try {
-			const sel = window.getSelection();
-			if (!sel || sel.rangeCount === 0) return;
-
-			const text = sel.toString().trim();
-			// 터치 환경에서 너무 짧은 선택은 무시
-			if (text.length < 2) return;
-
-			const range = sel.getRangeAt(0);
-			// 선택 영역이 채팅 메시지 내부인지 확인
-			const $mesText = $(range.commonAncestorContainer).closest('.mes_text');
-			if ($mesText.length === 0) return;
-
-			// 위치 계산: range 기준으로 메뉴를 띄움
-			const rect = range.getBoundingClientRect();
-			let pageX = rect.left + (rect.width / 2) + window.scrollX;
-			let pageY = rect.bottom + window.scrollY;
-
-			// 색상 메뉴 표시
-			showColorMenu(pageX, pageY, text, range, $mesText[0]);
-		} catch (err) {
-			console.warn('[SillyTavern-Highlighter] selectionchange handling error:', err);
-		}
-	}, 120);
-}
 
 function enableHighlightMode() {
     // 이벤트 위임 방식으로 변경 - 동적으로 로드되는 메시지에도 작동
@@ -2064,16 +2022,6 @@ function enableHighlightMode() {
             setTimeout(processSelection, delay);
         }
     });
-
-	// ⭐ 모바일(터치) 환경에서 selectionchange도 함께 사용하여 안정적으로 메뉴 표시
-	if (isTouchDevice()) {
-		try {
-			document.addEventListener('selectionchange', handleSelectionChange, { passive: true });
-		} catch (_) {
-			// 일부 환경에서 passive 옵션 미지원
-			document.addEventListener('selectionchange', handleSelectionChange);
-		}
-	}
 }
 
 function disableHighlightMode() {
@@ -2084,15 +2032,6 @@ function disableHighlightMode() {
         clearTimeout(touchSelectionTimer);
         touchSelectionTimer = null;
     }
-
-	// 모바일 selectionchange 리스너 해제
-	try {
-		document.removeEventListener('selectionchange', handleSelectionChange);
-	} catch (_) {}
-	if (selectionChangeTimer) {
-		clearTimeout(selectionChangeTimer);
-		selectionChangeTimer = null;
-	}
 }
 
 // 전역 변수: document click 핸들러 추적
