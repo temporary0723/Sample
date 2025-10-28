@@ -1924,11 +1924,11 @@ let lastTouchEnd = 0;
 let isDraggingText = false; // 드래그 중인지 추적
 
 function isTouchDevice() {
-	try {
-		return ("ontouchstart" in window) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
-	} catch (e) {
-		return false;
-	}
+    try {
+        return ("ontouchstart" in window) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
+    } catch (e) {
+        return false;
+    }
 }
 
 function enableHighlightMode() {
