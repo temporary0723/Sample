@@ -1921,6 +1921,9 @@ function getMessageLabel(mesId) {
 // ⭐ 모바일 터치 이벤트 안정화를 위한 변수
 let touchSelectionTimer = null;
 let lastTouchEnd = 0;
+// ⭐ 모바일(터치) 환경 감지 및 selectionchange 디바운스 타이머
+const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+let selectionChangeTimer = null;
 
 function enableHighlightMode() {
     // 이벤트 위임 방식으로 변경 - 동적으로 로드되는 메시지에도 작동
@@ -2022,6 +2025,58 @@ function enableHighlightMode() {
             setTimeout(processSelection, delay);
         }
     });
+
+    // ⭐ 모바일 크롬에서 드래그 핸들 사용 시 touchend가 발생하지 않는 경우 대비
+    // selectionchange로 텍스트 선택 변화를 감지하여 컬러 메뉴를 표시
+    if (isTouchDevice) {
+        $(document).off('selectionchange.hl').on('selectionchange.hl', function () {
+            // 너무 잦은 호출 방지
+            if (selectionChangeTimer) {
+                clearTimeout(selectionChangeTimer);
+            }
+            selectionChangeTimer = setTimeout(() => {
+                try {
+                    const sel = window.getSelection();
+                    if (!sel || sel.rangeCount === 0) return;
+
+                    const range = sel.getRangeAt(0);
+                    if (!range) return;
+
+                    let text = sel.toString();
+                    const originalText = text;
+                    text = text.trim();
+                    if (text.length < 2) return; // 오터치/한 글자 방지
+
+                    // 선택 영역이 .mes_text 내부인지 확인
+                    const containerEl = $(range.commonAncestorContainer).closest('.mes_text')[0];
+                    if (!containerEl) return;
+
+                    // 좌표 계산: 선택 영역 하단 중앙
+                    const rect = range.getBoundingClientRect();
+                    const pageX = (rect.left + rect.width / 2) + window.scrollX;
+                    const pageY = rect.bottom + window.scrollY;
+
+                    // trim으로 범위가 바뀐 경우 range 조정 시도
+                    if (originalText !== text) {
+                        try {
+                            const startOffset = originalText.indexOf(text);
+                            const newRange = document.createRange();
+                            newRange.setStart(range.startContainer, range.startOffset + startOffset);
+                            newRange.setEnd(range.startContainer, range.startOffset + startOffset + text.length);
+                            showColorMenu(pageX, pageY, text, newRange, containerEl);
+                            return;
+                        } catch (_) {
+                            // 실패 시 기존 range 사용
+                        }
+                    }
+
+                    showColorMenu(pageX, pageY, text, range, containerEl);
+                } catch (err) {
+                    // noop: selection 변경 중간 상태 등 예외는 무시
+                }
+            }, 120);
+        });
+    }
 }
 
 function disableHighlightMode() {
@@ -2031,6 +2086,13 @@ function disableHighlightMode() {
     if (touchSelectionTimer) {
         clearTimeout(touchSelectionTimer);
         touchSelectionTimer = null;
+    }
+
+    // ⭐ selectionchange 리스너 및 타이머 정리
+    $(document).off('selectionchange.hl');
+    if (selectionChangeTimer) {
+        clearTimeout(selectionChangeTimer);
+        selectionChangeTimer = null;
     }
 }
 
