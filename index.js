@@ -17,10 +17,32 @@ import {
 } from '../../../../scripts/slash-commands.js';
 
 const extensionName = 'SillyTavern-Highlighter';
-const EXT_PATHS = [
-    `scripts/extensions/third-party/${extensionName}`,
-    `../../../data/default-user/extensions/${extensionName}`, // 상대 경로 고려
-];
+
+// ⭐ 현재 실행 중인 index.js의 실제 경로 추론
+function getBasePathFromScriptLocation() {
+    try {
+        // ES Module을 사용하는 경우 import.meta.url 사용
+        if (typeof import.meta !== 'undefined' && import.meta.url) {
+            const url = new URL(import.meta.url);
+            const path = url.pathname;
+            // /scripts/extensions/third-party/SillyTavern-Highlighter/index.js 형태
+            // index.js를 제거하고 폴더만 반환
+            const dirPath = path.substring(0, path.lastIndexOf('/'));
+            console.log(`[SillyTavern-Highlighter] Script location from import.meta.url: ${dirPath}`);
+            return dirPath.substring(1); // 맨 앞의 / 제거
+        }
+    } catch (e) {
+        console.log('[SillyTavern-Highlighter] Could not use import.meta.url:', e);
+    }
+    
+    // import 문에서 추론한 상대 경로들을 시도
+    // index.js는 보통 scripts/extensions/third-party/{extName}/index.js 위치
+    // import from '../../../../script.js' 라는 것은 index.js 기준 4단계 상위
+    // 즉, index.js → third-party → extensions → scripts → 루트
+    const currentPath = 'scripts/extensions/third-party/' + extensionName;
+    console.log(`[SillyTavern-Highlighter] Using inferred path: ${currentPath}`);
+    return currentPath;
+}
 
 async function getExtensionFolderPath() {
     console.log('[SillyTavern-Highlighter] Searching for extension folder...');
@@ -28,8 +50,19 @@ async function getExtensionFolderPath() {
     console.log('[SillyTavern-Highlighter] Current path:', window.location.pathname);
     console.log('[SillyTavern-Highlighter] Base href:', document.querySelector('base')?.href || 'none');
     
-    for (const path of EXT_PATHS) {
-        const fullUrl = `${path}/settings.html`;
+    // ⭐ 현재 스크립트의 위치에서 기본 경로 추론
+    const inferredPath = getBasePathFromScriptLocation();
+    console.log(`[SillyTavern-Highlighter] Inferred base path: ${inferredPath}`);
+    
+    // 시도할 경로 목록 (추론된 경로를 우선 사용)
+    const pathsToTry = [
+        inferredPath,
+        `scripts/extensions/third-party/${extensionName}`,
+        `${extensionName}`, // 현재 디렉토리가 확장팩 폴더일 수도 있음
+    ];
+    
+    for (const path of pathsToTry) {
+        const fullUrl = `${path}/button.html`; // button.html로 확인
         console.log(`[SillyTavern-Highlighter] Trying: ${fullUrl}`);
         try {
             await $.get(fullUrl); // 존재 확인용
@@ -40,9 +73,10 @@ async function getExtensionFolderPath() {
             continue;
         }
     }
+    
     console.warn(`[SillyTavern-Highlighter] Could not locate extension folder for "${extensionName}".`);
-    console.log(`[SillyTavern-Highlighter] Will use fallback path: ${EXT_PATHS[0]}`);
-    return EXT_PATHS[0]; // 기본값
+    console.log(`[SillyTavern-Highlighter] Will use inferred path: ${inferredPath}`);
+    return inferredPath; // 기본값
 }
 
 // 요술봉 메뉴에 버튼 추가
