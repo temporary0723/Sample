@@ -17,66 +17,50 @@ import {
 } from '../../../../scripts/slash-commands.js';
 
 const extensionName = 'SillyTavern-Highlighter';
-
-// 현재 스크립트의 로딩 URL로부터 확장 폴더 경로를 역으로 산출 (포크 폴더명 대응)
-function resolveSelfFolderFromScriptTag() {
-    try {
-        // import된 모듈이므로 document.currentScript는 null일 수 있어 스택 트레이스로 보정
-        const possibleUrl = (document.currentScript && document.currentScript.src) || (new Error().stack || '').toString();
-        const match = possibleUrl.match(/(.*\/)(?:index\.js)(?:\?[^\s)]*)?/);
-        if (match && match[1]) {
-            // 끝의 슬래시 제거
-            return match[1].replace(/\/$/, '');
-        }
-    } catch (_) {
-        // ignore
-    }
-    return null;
-}
+const EXT_PATHS = [
+    `scripts/extensions/third-party/${extensionName}`,
+    `../../../data/default-user/extensions/${extensionName}`, // 상대 경로 고려
+];
 
 async function getExtensionFolderPath() {
-    // 1) 스크립트 자신의 경로에서 추론
-    const selfFolder = resolveSelfFolderFromScriptTag();
-    if (selfFolder) {
+    console.log('[SillyTavern-Highlighter] Searching for extension folder...');
+    console.log('[SillyTavern-Highlighter] Current URL:', window.location.href);
+    console.log('[SillyTavern-Highlighter] Current path:', window.location.pathname);
+    console.log('[SillyTavern-Highlighter] Base href:', document.querySelector('base')?.href || 'none');
+    
+    for (const path of EXT_PATHS) {
+        const fullUrl = `${path}/settings.html`;
+        console.log(`[SillyTavern-Highlighter] Trying: ${fullUrl}`);
         try {
-            await $.get(`${selfFolder}/settings.html`);
-            return selfFolder;
-        } catch (_) {
-            // 계속 진행하여 fallback 경로 시도
+            await $.get(fullUrl); // 존재 확인용
+            console.log(`[SillyTavern-Highlighter] ✅ Success! Extension folder found at: ${path}`);
+            return path;
+        } catch (error) {
+            console.log(`[SillyTavern-Highlighter] ❌ Failed: ${fullUrl} - ${error.status || error}`);
+            continue;
         }
     }
-
-    // 2) SillyTavern 표준 경로들 (fallback)
-    const candidates = [
-        'scripts/extensions/third-party',
-        '../../../data/default-user/extensions',
-    ];
-
-    for (const base of candidates) {
-        const path = `${base}/${extensionName}`;
-        try {
-            await $.get(`${path}/settings.html`);
-            return path;
-        } catch (_) {}
-    }
-
-    console.warn(`[SillyTavern-Highlighter] Could not locate extension folder. Buttons/settings may not load.`);
-    // 마지막 수단: 현재 페이지 기준 상대경로 시도
-    return '.';
+    console.warn(`[SillyTavern-Highlighter] Could not locate extension folder for "${extensionName}".`);
+    console.log(`[SillyTavern-Highlighter] Will use fallback path: ${EXT_PATHS[0]}`);
+    return EXT_PATHS[0]; // 기본값
 }
 
 // 요술봉 메뉴에 버튼 추가
 async function addToWandMenu() {
     try {
         const extensionFolderPath = await getExtensionFolderPath();
+        console.log(`[SillyTavern-Highlighter] Loading button.html from: ${extensionFolderPath}/button.html`);
         const buttonHtml = await $.get(`${extensionFolderPath}/button.html`);
+        console.log(`[SillyTavern-Highlighter] ✅ Button HTML loaded successfully`);
 
         const extensionsMenu = $("#extensionsMenu");
+        console.log(`[SillyTavern-Highlighter] Looking for #extensionsMenu - Found: ${extensionsMenu.length > 0 ? 'YES' : 'NO'}`);
         if (extensionsMenu.length > 0) {
             // 기존 버튼이 있으면 제거 후 추가
             $("#highlighter_wand_button, #highlighter_panel_button").remove();
 
             extensionsMenu.append(buttonHtml);
+            console.log(`[SillyTavern-Highlighter] ✅ Buttons added to menu`);
 
             // 형광펜 모드 버튼 클릭 이벤트
             $("#highlighter_wand_button").on("click", function() {
@@ -90,11 +74,15 @@ async function addToWandMenu() {
 
             // 설정에 따라 표시/숨김
             updateWandMenuVisibility();
+            console.log(`[SillyTavern-Highlighter] Wand menu visibility updated`);
         } else {
+            console.log(`[SillyTavern-Highlighter] #extensionsMenu not found, retrying in 1 second...`);
             setTimeout(addToWandMenu, 1000);
         }
     } catch (error) {
         // 버튼 로드 실패시 재시도
+        console.error(`[SillyTavern-Highlighter] ❌ Error loading button menu:`, error);
+        console.log(`[SillyTavern-Highlighter] Retrying in 1 second...`);
         setTimeout(addToWandMenu, 1000);
     }
 }
