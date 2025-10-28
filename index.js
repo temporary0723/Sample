@@ -1922,8 +1922,6 @@ function getMessageLabel(mesId) {
 let touchSelectionTimer = null;
 let lastTouchEnd = 0;
 let selectionChangeTimer = null; // 모바일 selectionchange 디바운스용
-let isTextDragging = false; // 텍스트 드래그 중인지 추적
-let touchStartTime = 0; // 터치 시작 시간
 
 function isTouchDevice() {
 	try {
@@ -1937,15 +1935,9 @@ function handleSelectionChange() {
 	// 하이라이트 모드가 아닐 때는 무시
 	if (!isHighlightMode) return;
 
-	// ⭐ 드래그 중이면 무시 (드래그가 끝날 때까지 기다림)
-	if (isTextDragging) return;
-
 	// 디바운스: 빠른 selectionchange 스팸 방지
 	if (selectionChangeTimer) clearTimeout(selectionChangeTimer);
 	selectionChangeTimer = setTimeout(() => {
-		// ⭐ 다시 한번 드래그 중인지 확인
-		if (isTextDragging) return;
-
 		try {
 			const sel = window.getSelection();
 			if (!sel || sel.rangeCount === 0) return;
@@ -1973,33 +1965,12 @@ function handleSelectionChange() {
 }
 
 function enableHighlightMode() {
-    // ⭐ 터치 시작 추적 (모바일)
-    $(document).off('touchstart.hl', '.mes_text').on('touchstart.hl', '.mes_text', function (e) {
-        // 메시지 텍스트 내부에서만 작동
-        if (!$(e.target).closest('.mes_text').length) return;
-        isTextDragging = true;
-        touchStartTime = Date.now();
-    });
-
-    // ⭐ 터치/마우스 종료 시 메뉴 표시
+    // 이벤트 위임 방식으로 변경 - 동적으로 로드되는 메시지에도 작동
     $(document).off('mouseup.hl touchend.hl', '.mes_text').on('mouseup.hl touchend.hl', '.mes_text', function (e) {
         const element = this;
 
         // 모바일 터치 이벤트의 경우 약간의 딜레이 추가
         const isTouchEvent = e.type === 'touchend';
-
-        // ⭐ 드래그 종료 표시
-        if (isTouchEvent) {
-            // 드래그가 충분히 길었는지 확인 (짧은 탭 방지)
-            const dragDuration = Date.now() - touchStartTime;
-            if (dragDuration < 50) {
-                // 너무 짧으면 클릭으로 간주
-                isTextDragging = false;
-                return;
-            }
-            // 드래그 종료
-            isTextDragging = false;
-        }
 
         // ⭐ 터치 이벤트 중복 방지 - 같은 터치가 여러 번 발생하는 것 방지
         if (isTouchEvent) {
@@ -2106,7 +2077,7 @@ function enableHighlightMode() {
 }
 
 function disableHighlightMode() {
-    $(document).off('touchstart.hl mouseup.hl touchend.hl', '.mes_text');
+    $(document).off('mouseup.hl touchend.hl', '.mes_text');
 
     // ⭐ 대기 중인 터치 타이머 제거
     if (touchSelectionTimer) {
@@ -2122,9 +2093,6 @@ function disableHighlightMode() {
 		clearTimeout(selectionChangeTimer);
 		selectionChangeTimer = null;
 	}
-
-	// 드래그 상태 초기화
-	isTextDragging = false;
 }
 
 // 전역 변수: document click 핸들러 추적
