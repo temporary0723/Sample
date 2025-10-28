@@ -1921,7 +1921,7 @@ function getMessageLabel(mesId) {
 // ⭐ 모바일 터치 이벤트 안정화를 위한 변수
 let touchSelectionTimer = null;
 let lastTouchEnd = 0;
-let selectionChangeTimer = null; // 모바일 selectionchange 디바운스용
+let isDraggingText = false; // 드래그 중인지 추적
 
 function isTouchDevice() {
 	try {
@@ -1931,46 +1931,26 @@ function isTouchDevice() {
 	}
 }
 
-function handleSelectionChange() {
-	// 하이라이트 모드가 아닐 때는 무시
-	if (!isHighlightMode) return;
-
-	// 디바운스: 빠른 selectionchange 스팸 방지
-	if (selectionChangeTimer) clearTimeout(selectionChangeTimer);
-	selectionChangeTimer = setTimeout(() => {
-		try {
-			const sel = window.getSelection();
-			if (!sel || sel.rangeCount === 0) return;
-
-			const text = sel.toString().trim();
-			// 터치 환경에서 너무 짧은 선택은 무시
-			if (text.length < 2) return;
-
-			const range = sel.getRangeAt(0);
-			// 선택 영역이 채팅 메시지 내부인지 확인
-			const $mesText = $(range.commonAncestorContainer).closest('.mes_text');
-			if ($mesText.length === 0) return;
-
-			// 위치 계산: range 기준으로 메뉴를 띄움
-			const rect = range.getBoundingClientRect();
-			let pageX = rect.left + (rect.width / 2) + window.scrollX;
-			let pageY = rect.bottom + window.scrollY;
-
-			// 색상 메뉴 표시
-			showColorMenu(pageX, pageY, text, range, $mesText[0]);
-		} catch (err) {
-			console.warn('[SillyTavern-Highlighter] selectionchange handling error:', err);
-		}
-	}, 120);
-}
-
 function enableHighlightMode() {
     // 이벤트 위임 방식으로 변경 - 동적으로 로드되는 메시지에도 작동
+    
+    // 터치 시작: 드래그 상태 시작
+    $(document).off('touchstart.hl', '.mes_text').on('touchstart.hl', '.mes_text', function (e) {
+        // 다른 요소의 touchstart는 무시 (채팅 메시지 내부만)
+        if (!$(e.target).closest('.mes_text').length) return;
+        isDraggingText = true;
+    });
+    
     $(document).off('mouseup.hl touchend.hl', '.mes_text').on('mouseup.hl touchend.hl', '.mes_text', function (e) {
         const element = this;
 
         // 모바일 터치 이벤트의 경우 약간의 딜레이 추가
         const isTouchEvent = e.type === 'touchend';
+        
+        // 드래그 상태 해제
+        if (isTouchEvent) {
+            isDraggingText = false;
+        }
 
         // ⭐ 터치 이벤트 중복 방지 - 같은 터치가 여러 번 발생하는 것 방지
         if (isTouchEvent) {
@@ -1988,7 +1968,7 @@ function enableHighlightMode() {
             }
         }
 
-        const delay = isTouchEvent ? 150 : 0;
+        const delay = isTouchEvent ? 200 : 0; // 디바운스 시간 약간 증가
 
         const processSelection = () => {
             try {
@@ -2064,35 +2044,19 @@ function enableHighlightMode() {
             setTimeout(processSelection, delay);
         }
     });
-
-	// ⭐ 모바일(터치) 환경에서 selectionchange도 함께 사용하여 안정적으로 메뉴 표시
-	if (isTouchDevice()) {
-		try {
-			document.addEventListener('selectionchange', handleSelectionChange, { passive: true });
-		} catch (_) {
-			// 일부 환경에서 passive 옵션 미지원
-			document.addEventListener('selectionchange', handleSelectionChange);
-		}
-	}
 }
 
 function disableHighlightMode() {
-    $(document).off('mouseup.hl touchend.hl', '.mes_text');
+    $(document).off('mouseup.hl touchend.hl touchstart.hl', '.mes_text');
 
     // ⭐ 대기 중인 터치 타이머 제거
     if (touchSelectionTimer) {
         clearTimeout(touchSelectionTimer);
         touchSelectionTimer = null;
     }
-
-	// 모바일 selectionchange 리스너 해제
-	try {
-		document.removeEventListener('selectionchange', handleSelectionChange);
-	} catch (_) {}
-	if (selectionChangeTimer) {
-		clearTimeout(selectionChangeTimer);
-		selectionChangeTimer = null;
-	}
+    
+    // 드래그 상태 초기화
+    isDraggingText = false;
 }
 
 // 전역 변수: document click 핸들러 추적
