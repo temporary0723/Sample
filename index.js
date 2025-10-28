@@ -37,15 +37,11 @@ async function getExtensionFolderPath() {
 
 // 요술봉 메뉴에 버튼 추가
 async function addToWandMenu() {
-    console.log('[SillyTavern-Highlighter] addToWandMenu called');
     try {
         const extensionFolderPath = await getExtensionFolderPath();
-        console.log('[SillyTavern-Highlighter] Extension folder path:', extensionFolderPath);
         const buttonHtml = await $.get(`${extensionFolderPath}/button.html`);
-        console.log('[SillyTavern-Highlighter] Button HTML loaded successfully');
 
         const extensionsMenu = $("#extensionsMenu");
-        console.log('[SillyTavern-Highlighter] Extensions menu found:', extensionsMenu.length > 0);
         if (extensionsMenu.length > 0) {
             // 기존 버튼이 있으면 제거 후 추가
             $("#highlighter_wand_button, #highlighter_panel_button").remove();
@@ -64,14 +60,11 @@ async function addToWandMenu() {
 
             // 설정에 따라 표시/숨김
             updateWandMenuVisibility();
-            console.log('[SillyTavern-Highlighter] Wand menu buttons added successfully');
         } else {
-            console.log('[SillyTavern-Highlighter] Extensions menu not found, retrying...');
             setTimeout(addToWandMenu, 1000);
         }
     } catch (error) {
         // 버튼 로드 실패시 재시도
-        console.warn('[SillyTavern-Highlighter] addToWandMenu error:', error);
         setTimeout(addToWandMenu, 1000);
     }
 }
@@ -1928,45 +1921,84 @@ function getMessageLabel(mesId) {
 // ⭐ 모바일 터치 이벤트 안정화를 위한 변수
 let touchSelectionTimer = null;
 let lastTouchEnd = 0;
-let isDraggingText = false; // 드래그 중인지 추적
-
-console.log('[SillyTavern-Highlighter] Global variables initialized:', { touchSelectionTimer, lastTouchEnd, isDraggingText });
+let selectionChangeTimer = null; // 모바일 selectionchange 디바운스용
+let isTextDragging = false; // 텍스트 드래그 중인지 추적
+let touchStartTime = 0; // 터치 시작 시간
 
 function isTouchDevice() {
 	try {
-		const isTouch = ("ontouchstart" in window) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
-		console.log('[SillyTavern-Highlighter] isTouchDevice:', isTouch);
-		return isTouch;
+		return ("ontouchstart" in window) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
 	} catch (e) {
-		console.error('[SillyTavern-Highlighter] Error in isTouchDevice:', e);
 		return false;
 	}
 }
 
+function handleSelectionChange() {
+	// 하이라이트 모드가 아닐 때는 무시
+	if (!isHighlightMode) return;
+
+	// ⭐ 드래그 중이면 무시 (드래그가 끝날 때까지 기다림)
+	if (isTextDragging) return;
+
+	// 디바운스: 빠른 selectionchange 스팸 방지
+	if (selectionChangeTimer) clearTimeout(selectionChangeTimer);
+	selectionChangeTimer = setTimeout(() => {
+		// ⭐ 다시 한번 드래그 중인지 확인
+		if (isTextDragging) return;
+
+		try {
+			const sel = window.getSelection();
+			if (!sel || sel.rangeCount === 0) return;
+
+			const text = sel.toString().trim();
+			// 터치 환경에서 너무 짧은 선택은 무시
+			if (text.length < 2) return;
+
+			const range = sel.getRangeAt(0);
+			// 선택 영역이 채팅 메시지 내부인지 확인
+			const $mesText = $(range.commonAncestorContainer).closest('.mes_text');
+			if ($mesText.length === 0) return;
+
+			// 위치 계산: range 기준으로 메뉴를 띄움
+			const rect = range.getBoundingClientRect();
+			let pageX = rect.left + (rect.width / 2) + window.scrollX;
+			let pageY = rect.bottom + window.scrollY;
+
+			// 색상 메뉴 표시
+			showColorMenu(pageX, pageY, text, range, $mesText[0]);
+		} catch (err) {
+			console.warn('[SillyTavern-Highlighter] selectionchange handling error:', err);
+		}
+	}, 120);
+}
+
 function enableHighlightMode() {
-    console.log('[SillyTavern-Highlighter] enableHighlightMode called');
-    // 이벤트 위임 방식으로 변경 - 동적으로 로드되는 메시지에도 작동
-    
-    // 터치 시작: 드래그 상태 시작
+    // ⭐ 터치 시작 추적 (모바일)
     $(document).off('touchstart.hl', '.mes_text').on('touchstart.hl', '.mes_text', function (e) {
-        // 다른 요소의 touchstart는 무시 (채팅 메시지 내부만)
+        // 메시지 텍스트 내부에서만 작동
         if (!$(e.target).closest('.mes_text').length) return;
-        isDraggingText = true;
-        console.log('[SillyTavern-Highlighter] touchstart.hl: isDraggingText =', isDraggingText);
+        isTextDragging = true;
+        touchStartTime = Date.now();
     });
-    
+
+    // ⭐ 터치/마우스 종료 시 메뉴 표시
     $(document).off('mouseup.hl touchend.hl', '.mes_text').on('mouseup.hl touchend.hl', '.mes_text', function (e) {
-        console.log('[SillyTavern-Highlighter] mouseup.hl/touchend.hl triggered, event type:', e.type);
         const element = this;
 
         // 모바일 터치 이벤트의 경우 약간의 딜레이 추가
         const isTouchEvent = e.type === 'touchend';
-        console.log('[SillyTavern-Highlighter] isTouchEvent:', isTouchEvent);
-        
-        // 드래그 상태 해제
+
+        // ⭐ 드래그 종료 표시
         if (isTouchEvent) {
-            isDraggingText = false;
-            console.log('[SillyTavern-Highlighter] touchend: isDraggingText =', isDraggingText);
+            // 드래그가 충분히 길었는지 확인 (짧은 탭 방지)
+            const dragDuration = Date.now() - touchStartTime;
+            if (dragDuration < 50) {
+                // 너무 짧으면 클릭으로 간주
+                isTextDragging = false;
+                return;
+            }
+            // 드래그 종료
+            isTextDragging = false;
         }
 
         // ⭐ 터치 이벤트 중복 방지 - 같은 터치가 여러 번 발생하는 것 방지
@@ -1974,7 +2006,6 @@ function enableHighlightMode() {
             const now = Date.now();
             if (now - lastTouchEnd < 300) {
                 // 300ms 이내 중복 터치는 무시
-                console.log('[SillyTavern-Highlighter] Ignoring duplicate touchend event');
                 return;
             }
             lastTouchEnd = now;
@@ -1986,22 +2017,18 @@ function enableHighlightMode() {
             }
         }
 
-        const delay = isTouchEvent ? 200 : 0; // 디바운스 시간 약간 증가
-        console.log('[SillyTavern-Highlighter] delay:', delay);
+        const delay = isTouchEvent ? 150 : 0;
 
         const processSelection = () => {
-            console.log('[SillyTavern-Highlighter] processSelection called');
             try {
                 const sel = window.getSelection();
 
                 // ⭐ 안전장치: range가 없는 경우 처리
                 if (!sel || sel.rangeCount === 0) {
-                    console.log('[SillyTavern-Highlighter] No selection or range');
                     return;
                 }
 
                 let text = sel.toString();
-                console.log('[SillyTavern-Highlighter] Selected text length:', text.length);
 
                 // 앞뒤 빈줄 제거
                 const originalText = text;
@@ -2009,19 +2036,16 @@ function enableHighlightMode() {
 
                 // 선택된 텍스트가 없으면 종료 (단순 클릭)
                 if (text.length === 0) {
-                    console.log('[SillyTavern-Highlighter] Text is empty after trim');
                     // 하이라이트 요소 클릭 시 컨텍스트 메뉴는 별도 이벤트에서 처리
                     return;
                 }
 
                 // ⭐ 텍스트가 너무 짧으면(1자 이하) 무시 (오터치 방지)
                 if (text.length < 2 && isTouchEvent) {
-                    console.log('[SillyTavern-Highlighter] Text too short:', text.length);
                     return;
                 }
 
                 // 선택된 텍스트가 있으면 색상 메뉴 표시 (하이라이트 영역 포함해도 OK)
-                console.log('[SillyTavern-Highlighter] Text selected:', text.substring(0, 50));
 
                 const range = sel.getRangeAt(0);
 
@@ -2049,18 +2073,15 @@ function enableHighlightMode() {
                         newRange.setStart(startNode, range.startOffset + startOffset);
                         newRange.setEnd(endNode, range.startOffset + startOffset + text.length);
 
-                        console.log('[SillyTavern-Highlighter] Calling showColorMenu with adjusted range');
                         showColorMenu(pageX, pageY, text, newRange, element);
                     } catch (err) {
-                        console.log('[SillyTavern-Highlighter] Error adjusting range, using original:', err);
                         showColorMenu(pageX, pageY, text, range, element);
                     }
                 } else {
-                    console.log('[SillyTavern-Highlighter] Calling showColorMenu with original range');
                     showColorMenu(pageX, pageY, text, range, element);
                 }
             } catch (error) {
-                console.error('[SillyTavern-Highlighter] Error processing selection:', error);
+                console.warn('[SillyTavern-Highlighter] Error processing selection:', error);
             }
         };
 
@@ -2072,34 +2093,48 @@ function enableHighlightMode() {
             setTimeout(processSelection, delay);
         }
     });
+
+	// ⭐ 모바일(터치) 환경에서 selectionchange도 함께 사용하여 안정적으로 메뉴 표시
+	if (isTouchDevice()) {
+		try {
+			document.addEventListener('selectionchange', handleSelectionChange, { passive: true });
+		} catch (_) {
+			// 일부 환경에서 passive 옵션 미지원
+			document.addEventListener('selectionchange', handleSelectionChange);
+		}
+	}
 }
 
 function disableHighlightMode() {
-    console.log('[SillyTavern-Highlighter] disableHighlightMode called');
-    $(document).off('mouseup.hl touchend.hl touchstart.hl', '.mes_text');
+    $(document).off('touchstart.hl mouseup.hl touchend.hl', '.mes_text');
 
     // ⭐ 대기 중인 터치 타이머 제거
     if (touchSelectionTimer) {
         clearTimeout(touchSelectionTimer);
         touchSelectionTimer = null;
-        console.log('[SillyTavern-Highlighter] Cleared touchSelectionTimer');
     }
-    
-    // 드래그 상태 초기화
-    isDraggingText = false;
-    console.log('[SillyTavern-Highlighter] isDraggingText reset to false');
+
+	// 모바일 selectionchange 리스너 해제
+	try {
+		document.removeEventListener('selectionchange', handleSelectionChange);
+	} catch (_) {}
+	if (selectionChangeTimer) {
+		clearTimeout(selectionChangeTimer);
+		selectionChangeTimer = null;
+	}
+
+	// 드래그 상태 초기화
+	isTextDragging = false;
 }
 
 // 전역 변수: document click 핸들러 추적
 let colorMenuDocClickHandler = null;
 
 function showColorMenu(x, y, text, range, el) {
-    console.log('[SillyTavern-Highlighter] showColorMenu called with:', { x, y, text: text.substring(0, 30) });
     // 기존 메뉴와 이벤트 제거
     removeColorMenu();
 
     const colors = getColors();
-    console.log('[SillyTavern-Highlighter] Number of colors:', colors.length);
     const colorButtons = colors.map(c =>
         `<button class="hl-color-btn" data-color="${c.bg}" style="background: ${c.bg}"></button>`
     ).join('');
@@ -2121,7 +2156,6 @@ function showColorMenu(x, y, text, range, el) {
     `;
 
     $('body').append(menu);
-    console.log('[SillyTavern-Highlighter] Color menu appended to body');
 
     // 화면 밖으로 나가지 않도록 위치 조정
     const $menu = $('#highlight-color-menu');
@@ -2130,7 +2164,6 @@ function showColorMenu(x, y, text, range, el) {
     // ⭐ page 좌표계를 viewport 좌표계로 변환
     let viewportX = menuX - window.scrollX;
     let viewportY = menuY - window.scrollY;
-    console.log('[SillyTavern-Highlighter] Initial viewport position:', { viewportX, viewportY });
 
     const margin = window.innerWidth <= 768 ? 20 : 10;
     const bottomMargin = window.innerWidth <= 768 ? 80 : 60; // 하단은 더 넓게
@@ -2178,19 +2211,14 @@ function showColorMenu(x, y, text, range, el) {
 
     setTimeout(() => {
         $(document).on('click.colorMenu', colorMenuDocClickHandler);
-        console.log('[SillyTavern-Highlighter] Document click handler registered');
     }, 100);
-    
-    console.log('[SillyTavern-Highlighter] showColorMenu completed');
 }
 
 function removeColorMenu() {
-    console.log('[SillyTavern-Highlighter] removeColorMenu called');
     $('#highlight-color-menu').remove();
     if (colorMenuDocClickHandler) {
         $(document).off('click.colorMenu', colorMenuDocClickHandler);
         colorMenuDocClickHandler = null;
-        console.log('[SillyTavern-Highlighter] Document click handler removed');
     }
 }
 
