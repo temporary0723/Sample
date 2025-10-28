@@ -37,11 +37,15 @@ async function getExtensionFolderPath() {
 
 // 요술봉 메뉴에 버튼 추가
 async function addToWandMenu() {
+    console.log('[SillyTavern-Highlighter] addToWandMenu called');
     try {
         const extensionFolderPath = await getExtensionFolderPath();
+        console.log('[SillyTavern-Highlighter] Extension folder path:', extensionFolderPath);
         const buttonHtml = await $.get(`${extensionFolderPath}/button.html`);
+        console.log('[SillyTavern-Highlighter] Button HTML loaded successfully');
 
         const extensionsMenu = $("#extensionsMenu");
+        console.log('[SillyTavern-Highlighter] Extensions menu found:', extensionsMenu.length > 0);
         if (extensionsMenu.length > 0) {
             // 기존 버튼이 있으면 제거 후 추가
             $("#highlighter_wand_button, #highlighter_panel_button").remove();
@@ -60,11 +64,14 @@ async function addToWandMenu() {
 
             // 설정에 따라 표시/숨김
             updateWandMenuVisibility();
+            console.log('[SillyTavern-Highlighter] Wand menu buttons added successfully');
         } else {
+            console.log('[SillyTavern-Highlighter] Extensions menu not found, retrying...');
             setTimeout(addToWandMenu, 1000);
         }
     } catch (error) {
         // 버튼 로드 실패시 재시도
+        console.warn('[SillyTavern-Highlighter] addToWandMenu error:', error);
         setTimeout(addToWandMenu, 1000);
     }
 }
