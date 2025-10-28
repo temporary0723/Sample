@@ -17,22 +17,52 @@ import {
 } from '../../../../scripts/slash-commands.js';
 
 const extensionName = 'SillyTavern-Highlighter';
-const EXT_PATHS = [
-    `scripts/extensions/third-party/${extensionName}`,
-    `../../../data/default-user/extensions/${extensionName}`, // 상대 경로 고려
-];
+
+// 현재 스크립트의 로딩 URL로부터 확장 폴더 경로를 역으로 산출 (포크 폴더명 대응)
+function resolveSelfFolderFromScriptTag() {
+    try {
+        // import된 모듈이므로 document.currentScript는 null일 수 있어 스택 트레이스로 보정
+        const possibleUrl = (document.currentScript && document.currentScript.src) || (new Error().stack || '').toString();
+        const match = possibleUrl.match(/(.*\/)(?:index\.js)(?:\?[^\s)]*)?/);
+        if (match && match[1]) {
+            // 끝의 슬래시 제거
+            return match[1].replace(/\/$/, '');
+        }
+    } catch (_) {
+        // ignore
+    }
+    return null;
+}
 
 async function getExtensionFolderPath() {
-    for (const path of EXT_PATHS) {
+    // 1) 스크립트 자신의 경로에서 추론
+    const selfFolder = resolveSelfFolderFromScriptTag();
+    if (selfFolder) {
         try {
-            await $.get(`${path}/settings.html`); // 존재 확인용
-            return path;
-        } catch {
-            continue;
+            await $.get(`${selfFolder}/settings.html`);
+            return selfFolder;
+        } catch (_) {
+            // 계속 진행하여 fallback 경로 시도
         }
     }
-    console.warn(`[SillyTavern-Highlighter] Could not locate extension folder for "${extensionName}".`);
-    return EXT_PATHS[0]; // 기본값
+
+    // 2) SillyTavern 표준 경로들 (fallback)
+    const candidates = [
+        'scripts/extensions/third-party',
+        '../../../data/default-user/extensions',
+    ];
+
+    for (const base of candidates) {
+        const path = `${base}/${extensionName}`;
+        try {
+            await $.get(`${path}/settings.html`);
+            return path;
+        } catch (_) {}
+    }
+
+    console.warn(`[SillyTavern-Highlighter] Could not locate extension folder. Buttons/settings may not load.`);
+    // 마지막 수단: 현재 페이지 기준 상대경로 시도
+    return '.';
 }
 
 // 요술봉 메뉴에 버튼 추가
